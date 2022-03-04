@@ -26,5 +26,11 @@ namespace v20220114graph_tutorial.Controllers
 
             return View();
         }
+
+        public ActionResult Error(string message, string debug)
+        {
+            Flash(message, debug);
+            return RedirectToAction("Index");
+        }
     }
 }

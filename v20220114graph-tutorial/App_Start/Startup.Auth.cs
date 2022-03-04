@@ -1,68 +1,116 @@
-﻿using System;
-using Microsoft.AspNet.Identity;
-using Microsoft.AspNet.Identity.Owin;
-using Microsoft.Owin;
+﻿using v20220114graph_tutorial.Models;
+using Microsoft.Identity.Client;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.Owin.Security;
 using Microsoft.Owin.Security.Cookies;
-using Microsoft.Owin.Security.Google;
+using Microsoft.Owin.Security.Notifications;
+using Microsoft.Owin.Security.OpenIdConnect;
 using Owin;
-using v20220114graph_tutorial.Models;
+using System.Configuration;
+using System.Threading.Tasks;
+using System.Web;
 
 namespace v20220114graph_tutorial
 {
     public partial class Startup
     {
-        // For more information on configuring authentication, please visit http://go.microsoft.com/fwlink/?LinkId=301864
+        // Load configuration settings from PrivateSettings.config
+        private static string appId = ConfigurationManager.AppSettings["ida:AppId"];
+        private static string appSecret = ConfigurationManager.AppSettings["ida:AppSecret"];
+        private static string redirectUri = ConfigurationManager.AppSettings["ida:RedirectUri"];
+        private static string graphScopes = ConfigurationManager.AppSettings["ida:AppScopes"];
+
         public void ConfigureAuth(IAppBuilder app)
         {
-            // Configure the db context, user manager and signin manager to use a single instance per request
-            app.CreatePerOwinContext(ApplicationDbContext.Create);
-            app.CreatePerOwinContext<ApplicationUserManager>(ApplicationUserManager.Create);
-            app.CreatePerOwinContext<ApplicationSignInManager>(ApplicationSignInManager.Create);
+            app.SetDefaultSignInAsAuthenticationType(CookieAuthenticationDefaults.AuthenticationType);
 
-            // Enable the application to use a cookie to store information for the signed in user
-            // and to use a cookie to temporarily store information about a user logging in with a third party login provider
-            // Configure the sign in cookie
-            app.UseCookieAuthentication(new CookieAuthenticationOptions
-            {
-                AuthenticationType = DefaultAuthenticationTypes.ApplicationCookie,
-                LoginPath = new PathString("/Account/Login"),
-                Provider = new CookieAuthenticationProvider
+            app.UseCookieAuthentication(new CookieAuthenticationOptions());
+
+            app.UseOpenIdConnectAuthentication(
+                new OpenIdConnectAuthenticationOptions
                 {
-                    // Enables the application to validate the security stamp when the user logs in.
-                    // This is a security feature which is used when you change a password or add an external login to your account.  
-                    OnValidateIdentity = SecurityStampValidator.OnValidateIdentity<ApplicationUserManager, ApplicationUser>(
-                        validateInterval: TimeSpan.FromMinutes(30),
-                        regenerateIdentity: (manager, user) => user.GenerateUserIdentityAsync(manager))
+                    ClientId = appId,
+                    Authority = "https://login.microsoftonline.com/common/v2.0",
+                    Scope = $"openid email profile offline_access {graphScopes}",
+                    RedirectUri = redirectUri,
+                    PostLogoutRedirectUri = redirectUri,
+                    TokenValidationParameters = new TokenValidationParameters
+                    {
+                        // For demo purposes only, see below
+                        ValidateIssuer = false
+
+                        // In a real multi-tenant app, you would add logic to determine whether the
+                        // issuer was from an authorized tenant
+                        //ValidateIssuer = true,
+                        //IssuerValidator = (issuer, token, tvp) =>
+                        //{
+                        //  if (MyCustomTenantValidation(issuer))
+                        //  {
+                        //    return issuer;
+                        //  }
+                        //  else
+                        //  {
+                        //    throw new SecurityTokenInvalidIssuerException("Invalid issuer");
+                        //  }
+                        //}
+                    },
+                    Notifications = new OpenIdConnectAuthenticationNotifications
+                    {
+                        AuthenticationFailed = OnAuthenticationFailedAsync,
+                        AuthorizationCodeReceived = OnAuthorizationCodeReceivedAsync
+                    }
                 }
-            });            
-            app.UseExternalSignInCookie(DefaultAuthenticationTypes.ExternalCookie);
+            );
+        }
 
-            // Enables the application to temporarily store user information when they are verifying the second factor in the two-factor authentication process.
-            app.UseTwoFactorSignInCookie(DefaultAuthenticationTypes.TwoFactorCookie, TimeSpan.FromMinutes(5));
+        private static Task OnAuthenticationFailedAsync(AuthenticationFailedNotification<OpenIdConnectMessage,
+            OpenIdConnectAuthenticationOptions> notification)
+        {
+            notification.HandleResponse();
+            string redirect = $"/Home/Error?message={notification.Exception.Message}";
+            if (notification.ProtocolMessage != null && !string.IsNullOrEmpty(notification.ProtocolMessage.ErrorDescription))
+            {
+                redirect += $"&debug={notification.ProtocolMessage.ErrorDescription}";
+            }
+            notification.Response.Redirect(redirect);
+            return Task.FromResult(0);
+        }
 
-            // Enables the application to remember the second login verification factor such as phone or email.
-            // Once you check this option, your second step of verification during the login process will be remembered on the device where you logged in from.
-            // This is similar to the RememberMe option when you log in.
-            app.UseTwoFactorRememberBrowserCookie(DefaultAuthenticationTypes.TwoFactorRememberBrowserCookie);
+        private async Task OnAuthorizationCodeReceivedAsync(AuthorizationCodeReceivedNotification notification)
+        {
+            var idClient = ConfidentialClientApplicationBuilder.Create(appId)
+                .WithRedirectUri(redirectUri)
+                .WithClientSecret(appSecret)
+                .Build();
 
-            // Uncomment the following lines to enable logging in with third party login providers
-            //app.UseMicrosoftAccountAuthentication(
-            //    clientId: "",
-            //    clientSecret: "");
+            string message;
+            string debug;
 
-            //app.UseTwitterAuthentication(
-            //   consumerKey: "",
-            //   consumerSecret: "");
+            try
+            {
+                string[] scopes = graphScopes.Split(' ');
 
-            //app.UseFacebookAuthentication(
-            //   appId: "",
-            //   appSecret: "");
+                var result = await idClient.AcquireTokenByAuthorizationCode(
+                    scopes, notification.Code).ExecuteAsync();
 
-            //app.UseGoogleAuthentication(new GoogleOAuth2AuthenticationOptions()
-            //{
-            //    ClientId = "",
-            //    ClientSecret = ""
-            //});
+                message = "Access token retrieved.";
+                debug = result.AccessToken;
+            }
+            catch (MsalException ex)
+            {
+                message = "AcquireTokenByAuthorizationCodeAsync threw an exception";
+                debug = ex.Message;
+            }
+
+            var queryString = $"message={message}&debug={debug}";
+            if (queryString.Length > 2048)
+            {
+                queryString = queryString.Substring(0, 2040) + "...";
+            }
+
+            notification.HandleResponse();
+            notification.Response.Redirect($"/Home/Error?{queryString}");
         }
     }
 }

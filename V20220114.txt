@@ -1,0 +1,12 @@
+2022-01-14 
+v20220114graph-tutorial
+http://localhost:53859/
+Exercise - Build ASP.NET MVC web applications with the Microsoft Graph .NET SDK with VS Community 2015
+.NET Framework 4.8
+https://docs.microsoft.com/en-us/learn/modules/msgraph-build-aspnetmvc-apps/3-exercise-create-app 
+
+2022-03-04
+Create an Azure AD Application
+Exercise - Incorporate the Microsoft Authentication Library into ASP.NET MVC web apps
+https://docs.microsoft.com/en-us/learn/modules/msgraph-build-aspnetmvc-apps/5-exercise-add-auth
+AADSTS900144: The request body must contain the following parameter: 'client_id'.
